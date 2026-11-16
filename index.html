@@ -39,6 +39,8 @@ summary{cursor:pointer;color:var(--tx)}
 .sq.d{background:var(--dk)}
 .pw{color:#fff;text-shadow:-1px 0 #000,1px 0 #000,0 -1px #000,0 1px #000}
 .pb{color:#15181e}
+.sq.kgm{box-shadow:inset 0 0 0 2px #3b82f6}
+.sq.kge{box-shadow:inset 0 0 0 2px #d2452b}
 .sq.sel{outline:2px solid var(--acc);outline-offset:-2px}
 .sq.dst::after{content:"";position:absolute;width:36%;height:36%;border-radius:50%;background:#d2452b;opacity:.9}
 .sq.dst.cap::after{width:86%;height:86%;background:none;border:3px solid #d2452b}
@@ -320,7 +322,7 @@ function render(scroll){
       for(let y=7;y>=0;y--)for(let x=0;x<8;x++){
         const c=b[y*8+x],dm=dset.get(id+','+t+','+x+','+y);
         const s=sel&&sel.l===id&&sel.t===t&&sel.x===x&&sel.y===y;
-        h+=`<div class="sq ${(x+y)%2?'l':'d'}${s?' sel':''}${dm?(dm.cap?' dst cap':' dst'):''}" data-k="${id},${t},${x},${y}">${c?`<span class="${isW(c)?'pw':'pb'}">${GL[c.toUpperCase()]}</span>`:''}</div>`;
+        h+=`<div class="sq ${(x+y)%2?'l':'d'}${s?' sel':''}${isK(c)?(col(c)===me?' kgm':' kge'):''}${dm?(dm.cap?' dst cap':' dst'):''}" data-k="${id},${t},${x},${y}">${c?`<span class="${isW(c)?'pw':'pb'}">${GL[c.toUpperCase()]}</span>`:''}</div>`;
       }
       h+='</div></div>';
     });
@@ -447,6 +449,7 @@ const HELP=`
 <p><b>Золотая рамка и точка ●</b> — доска, на которой ты можешь ходить прямо сейчас. Это всегда самая правая доска в строке, если сейчас твой ход на ней. Остальные доски — история, на них ходить нельзя, но можно прыгнуть на них фигурой.</p>
 <p><b>Светлая рамка</b> вокруг доски — доска появилась после последнего хода. Экран сам прокрутится к ней.</p>
 <p><b>Белые фигуры</b> стоят внизу доски, чёрные вверху.</p>
+<p><b>Короли</b> обведены: твой синей рамкой, вражеский красной. Король тоже может прыгать по времени и вселенным. Если на главной доске короля нет, он ушёл на другую доску. Ищи красную рамку на других досках.</p>
 <p>Вверху экрана строка состояния: чей ход, думает ли бот, есть ли шах и чем кончилась игра.</p>
 
 <h3>3. Как сделать ход, шаг за шагом</h3>
