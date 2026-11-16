@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>5D шахматы</title>
+<style>
+:root{--bg:#14171d;--panel:#1d222b;--line:#2f3744;--tx:#e8e6df;--mut:#98a0ad;--acc:#e0a526;--lt:#d9d2bd;--dk:#7d8f69;--s:24px}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--tx);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+body{display:flex;flex-direction:column}
+button{font:inherit;color:inherit;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 14px;cursor:pointer}
+button:active{background:var(--line)}
+button.on{border-color:var(--acc);color:var(--acc)}
+button.go{background:var(--acc);color:#1a1405;border-color:var(--acc);font-weight:600;width:100%;margin-top:18px}
+#setup{padding:20px;max-width:480px;margin:0 auto;overflow:auto}
+#setup h1{font-size:26px;margin:8px 0 4px}
+#setup p{color:var(--mut);margin:0 0 16px;line-height:1.4}
+#setup h2{font-size:15px;margin:18px 0 8px;font-weight:600}
+.opts{display:flex;flex-wrap:wrap;gap:8px}
+details{margin-top:20px;color:var(--mut);font-size:14px;line-height:1.5}
+summary{cursor:pointer;color:var(--tx)}
+#game{display:none;flex:1;min-height:0;flex-direction:column}
+#bar{padding:8px 12px;border-bottom:1px solid var(--line);font-size:14px;min-height:38px}
+#wrap{flex:1;overflow:auto;padding:10px 6px}
+#foot{display:flex;gap:8px;padding:8px;border-top:1px solid var(--line)}
+#foot button{flex:1;padding:8px}
+.row{display:flex;align-items:flex-start;margin-bottom:10px;width:max-content}
+.lab{position:sticky;left:0;z-index:2;flex:none;width:34px;background:var(--bg);color:var(--mut);font-size:12px;padding-top:18px;text-align:center}
+.b{flex:none;width:calc(8*var(--s) + 4px);margin-right:6px;border:2px solid var(--line);border-radius:4px;background:var(--panel)}
+.b.act{border-color:var(--acc)}
+.b.new{box-shadow:0 0 0 2px rgba(255,255,255,.25)}
+.h{font-size:11px;height:15px;line-height:15px;padding:0 3px;color:var(--mut);display:flex;justify-content:space-between}
+.b.act .h{color:var(--acc)}
+.g{display:grid;grid-template-columns:repeat(8,var(--s))}
+.sq{width:var(--s);height:var(--s);display:flex;align-items:center;justify-content:center;font-size:calc(var(--s)*.78);line-height:1;position:relative}
+.sq.l{background:var(--lt)}
+.sq.d{background:var(--dk)}
+.pw{color:#fff;text-shadow:-1px 0 #000,1px 0 #000,0 -1px #000,0 1px #000}
+.pb{color:#15181e}
+.sq.sel{outline:2px solid var(--acc);outline-offset:-2px}
+.sq.dst::after{content:"";position:absolute;width:36%;height:36%;border-radius:50%;background:#d2452b;opacity:.9}
+.sq.dst.cap::after{width:86%;height:86%;background:none;border:3px solid #d2452b}
+</style>
+</head>
+<body>
+
+<div id="setup">
+  <h1>5D шахматы</h1>
+  <p>Шахматы с путешествиями по времени и параллельным линиям. Играйте против бота.</p>
+  <h2>Сложность бота</h2>
+  <div class="opts" id="lv"></div>
+  <h2>Ваш цвет</h2>
+  <div class="opts" id="cl"></div>
+  <button class="go" id="start">Начать игру</button>
+  <details>
+    <summary>Как играть</summary>
+    <p>Каждая доска — позиция в определённый ход. Строки — параллельные линии (L0, L1…), столбцы — время. Золотая рамка — доска, на которой можно ходить сейчас.</p>
+    <p>Нажмите свою фигуру на золотой доске: красные точки покажут ходы на любые доски, в том числе в прошлое и на соседние линии. Прыжок в прошлое создаёт новую линию.</p>
+    <p>Фигуры ходят по четырём осям: клетки доски, время и линии. Ладья — по одной оси, слон — по двум сразу, ферзь — по любым, король — на один шаг, конь — 2+1 по любым двум осям. Пешка идёт вперёд по доске или на линию вперёд, бьёт по диагонали.</p>
+    <p>Упрощения: за очередь один ход, нет рокировки и взятия на проходе, пешка превращается в ферзя. Выигрывает тот, кто взял короля. Ход, после которого вашего короля можно взять, запрещён. Нет безопасных ходов — поражение.</p>
+  </details>
+</div>
+
+<div id="game">
+  <div id="bar"></div>
+  <div id="wrap"><div id="tls"></div></div>
+  <div id="foot">
+    <button id="zm">−</button>
+    <button id="zp">+</button>
+    <button id="nw">Новая игра</button>
+  </div>
+</div>
+
+<script>
+const V={P:1,N:3,B:3,R:5,Q:9,K:0};
+const GL={K:'♚\uFE0E',Q:'♛\uFE0E',R:'♜\uFE0E',B:'♝\uFE0E',N:'♞\uFE0E',P:'♟\uFE0E'};
+const isW=c=>c>='A'&&c<='Z';
+const col=c=>isW(c)?0:1;
+const isK=c=>c&&c.toUpperCase()==='K';
+
+/* ---------- модель ---------- */
+function init(){
+  const back='RNBQKBNR',b=Array(64).fill('');
+  for(let x=0;x<8;x++){b[x]=back[x];b[8+x]='P';b[48+x]='p';b[56+x]=back[x].toLowerCase();}
+  return {tl:{0:{s:0,b:[b]}},min:0,max:0,over:null,last:[]};
+}
+const headT=T=>T.s+T.b.length-1;
+function get(S,l,t){const T=S.tl[l];if(!T)return null;const i=t-T.s;return i<0||i>=T.b.length?null:T.b[i];}
+
+const D4=[];
+for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++)for(let c=-1;c<=1;c++)for(let d=-1;d<=1;d++){
+  const n=(a?1:0)+(b?1:0)+(c?1:0)+(d?1:0);if(n)D4.push([a,b,c,d,n]);
+}
+const NJ=[];
+for(let i=0;i<4;i++)for(let j=0;j<4;j++)if(i!==j)for(const s1 of[-2,2])for(const s2 of[-1,1]){
+  const v=[0,0,0,0];v[i]=s1;v[j]=s2;NJ.push(v);
+}
+
+/* вектор: [x, y, время(в ходах игрока), линия] */
+function genFrom(S,l,t,x,y){
+  const B=get(S,l,t),c=B[y*8+x],p=col(c),u=c.toUpperCase(),out=[];
+  const at=(nl,nt,nx,ny)=>{
+    if(nx<0||nx>7||ny<0||ny>7)return null;
+    const B2=get(S,nl,nt);return B2?B2[ny*8+nx]:null;
+  };
+  const push=(nl,nt,nx,ny,cap)=>{
+    const pr=(u==='P'&&(ny===7||ny===0))?(p?'q':'Q'):'';
+    out.push({sl:l,st:t,sx:x,sy:y,dl:nl,dt:nt,dx:nx,dy:ny,cap,pr});
+  };
+  if(u==='N'){
+    for(const v of NJ){
+      const nl=l+v[3],nt=t+2*v[2],nx=x+v[0],ny=y+v[1],q=at(nl,nt,nx,ny);
+      if(q===null)continue;
+      if(q===''||col(q)!==p)push(nl,nt,nx,ny,q);
+    }
+  }else if(u==='P'){
+    const f=p?-1:1;
+    if(at(l,t,x,y+f)===''){
+      push(l,t,x,y+f,'');
+      if((p?y===6:y===1)&&at(l,t,x,y+2*f)==='')push(l,t,x,y+2*f,'');
+    }
+    if(at(l+f,t,x,y)==='')push(l+f,t,x,y,'');
+    for(const s of[-1,1]){
+      let q=at(l,t,x+s,y+f);if(q&&col(q)!==p)push(l,t,x+s,y+f,q);
+      q=at(l+f,t,x+s,y);if(q&&col(q)!==p)push(l+f,t,x+s,y,q);
+      q=at(l,t+2*s,x,y+f);if(q&&col(q)!==p)push(l,t+2*s,x,y+f,q);
+      q=at(l+f,t+2*s,x,y);if(q&&col(q)!==p)push(l+f,t+2*s,x,y,q);
+    }
+  }else{
+    for(const d of D4){
+      const n=d[4];
+      if(u==='R'&&n!==1)continue;
+      if(u==='B'&&n!==2)continue;
+      const lim=u==='K'?1:99;
+      for(let i=1;i<=lim;i++){
+        const nl=l+d[3]*i,nt=t+2*d[2]*i,nx=x+d[0]*i,ny=y+d[1]*i,q=at(nl,nt,nx,ny);
+        if(q===null)break;
+        if(q===''){push(nl,nt,nx,ny,'');continue;}
+        if(col(q)!==p)push(nl,nt,nx,ny,q);
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+function genAll(S,p,par=p){
+  const out=[];
+  for(const id in S.tl){
+    const T=S.tl[id],t=headT(T);
+    if(t%2!==par)continue;
+    const B=T.b[T.b.length-1];
+    for(let i=0;i<64;i++){
+      const c=B[i];
+      if(c&&col(c)===p)for(const m of genFrom(S,+id,t,i&7,i>>3))out.push(m);
+    }
+  }
+  return out;
+}
+
+function apply(S,m){
+  const tl={...S.tl};let min=S.min,max=S.max;
+  const SB=get(S,m.sl,m.st),piece=SB[m.sy*8+m.sx],pc=m.pr||piece,p=col(piece),last=[];
+  const over=isK(m.cap)?p:null;
+  const ext=(id,nb)=>{const T=tl[id];tl[id]={s:T.s,b:[...T.b,nb]};last.push(id+':'+(T.s+T.b.length));};
+  if(m.dl===m.sl&&m.dt===m.st){
+    const nb=SB.slice();nb[m.sy*8+m.sx]='';nb[m.dy*8+m.dx]=pc;ext(m.sl,nb);
+  }else{
+    const nS=SB.slice();nS[m.sy*8+m.sx]='';ext(m.sl,nS);
+    const DB=get(S,m.dl,m.dt).slice();DB[m.dy*8+m.dx]=pc;
+    if(m.dt===headT(S.tl[m.dl])){ext(m.dl,DB);}
+    else{
+      const id=p?--min:++max;
+      tl[id]={s:m.dt+1,b:[DB]};last.push(id+':'+(m.dt+1));
+    }
+  }
+  return {tl,min,max,over,last};
+}
+
+function safe(S,m,p){
+  const S2=apply(S,m);
+  if(S2.over!==null)return true;
+  return !genAll(S2,1-p).some(x=>isK(x.cap));
+}
+function legalFor(S,p,l,t,x,y){return genFrom(S,l,t,x,y).filter(m=>safe(S,m,p));}
+function anyLegal(S,p){
+  for(const id in S.tl){
+    const T=S.tl[id],t=headT(T);
+    if(t%2!==p)continue;
+    const B=T.b[T.b.length-1];
+    for(let i=0;i<64;i++){
+      const c=B[i];
+      if(c&&col(c)===p){
+        for(const m of genFrom(S,+id,t,i&7,i>>3))if(safe(S,m,p))return true;
+      }
+    }
+  }
+  return false;
+}
+function inCheck(S,p){return genAll(S,1-p,p).some(m=>isK(m.cap));}
+
+/* ---------- бот ---------- */
+function evalS(S,p){
+  let s=0;
+  for(const id in S.tl){
+    const T=S.tl[id],b=T.b[T.b.length-1];
+    for(let i=0;i<64;i++){
+      const c=b[i];if(!c)continue;
+      const u=c.toUpperCase();let v=V[u]*10;
+      if(u==='P')v+=(isW(c)?(i>>3):7-(i>>3))*0.5;
+      s+=isW(c)?v:-v;
+    }
+  }
+  return p?-s:s;
+}
+const sc=m=>(m.cap?(isK(m.cap)?1000:V[m.cap.toUpperCase()]):0)+(m.pr?8:0);
+function nega(S,d,a,b,side,cap){
+  if(d===0)return evalS(S,side);
+  const mv=genAll(S,side);
+  if(!mv.length)return -9000;
+  mv.sort((x,y)=>sc(y)-sc(x));
+  let best=-Infinity;
+  for(const m of mv.slice(0,12)){
+    const S2=apply(S,m);
+    if(S2.over!==null)return 100000+d;
+    const v=-nega(S2,d-1,-b,-a,1-side);
+    if(v>best)best=v;
+    if(v>a)a=v;
+    if(a>=b)break;
+  }
+  return best;
+}
+function botMove(S,p,lvl){
+  const mv=genAll(S,p);
+  if(!mv.length)return null;
+  for(let i=mv.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[mv[i],mv[j]]=[mv[j],mv[i]];}
+  if(lvl===1)return mv.find(m=>isK(m.cap))||mv[0];
+  mv.sort((a,b)=>sc(b)-sc(a));
+  if(lvl===2)return mv[0];
+  const d=lvl===3?2:3,K=lvl===3?30:24;
+  let best=mv[0],bs=-Infinity;
+  for(const m of mv.slice(0,K)){
+    const S2=apply(S,m);
+    if(S2.over!==null)return m;
+    const v=-nega(S2,d-1,-Infinity,Infinity,1-p);
+    if(v>bs){bs=v;best=m;}
+  }
+  return best;
+}
+
+/* ---------- интерфейс ---------- */
+const $=id=>document.getElementById(id);
+const LV=['Новичок','Лёгкий','Средний','Сложный'];
+let lvl=2,me=0,G,turn,sel=null,dests=[],busy=false,chk=false,sz=24;
+const COL=()=>8*sz+10;
+
+function buildSetup(){
+  $('lv').innerHTML=LV.map((n,i)=>`<button data-v="${i+1}" class="${lvl===i+1?'on':''}">${n}</button>`).join('');
+  $('cl').innerHTML=[['Белые',0],['Чёрные',1]].map(([n,v])=>`<button data-c="${v}" class="${me===v?'on':''}">${n}</button>`).join('');
+}
+$('lv').onclick=e=>{const b=e.target.closest('button');if(b){lvl=+b.dataset.v;buildSetup();}};
+$('cl').onclick=e=>{const b=e.target.closest('button');if(b){me=+b.dataset.c;buildSetup();}};
+$('start').onclick=()=>{
+  $('setup').style.display='none';$('game').style.display='flex';
+  G=init();turn=0;sel=null;dests=[];busy=false;
+  afterMove(false);
+};
+$('nw').onclick=()=>{$('game').style.display='none';$('setup').style.display='block';busy=false;};
+function setSize(v){sz=Math.max(12,Math.min(44,v));document.documentElement.style.setProperty('--s',sz+'px');if(G)render(false);}
+$('zm').onclick=()=>setSize(sz-3);
+$('zp').onclick=()=>setSize(sz+3);
+
+function status(){
+  if(G.over!==null){
+    const w=G.over===me;
+    return w?(G.why?'🏆 Победа: у бота нет безопасных ходов':'🏆 Победа: король взят')
+            :(G.why?'Поражение: у вас нет безопасных ходов':'Поражение: ваш король взят');
+  }
+  const side=turn?'чёрные':'белые';
+  if(busy)return `Бот думает… (${LV[lvl-1]}, ${side})`;
+  let s=`Ваш ход · ${side}`;
+  if(chk)s+=' · ⚠ шах';
+  if(msg)s+=' · '+msg;
+  return s;
+}
+let msg='';
+
+function render(scroll){
+  const tmin=Math.min(...Object.values(G.tl).map(T=>T.s));
+  const ids=Object.keys(G.tl).map(Number).sort((a,b)=>b-a);
+  const dset=new Map(dests.map(m=>[m.dl+','+m.dt+','+m.dx+','+m.dy,m]));
+  const lastSet=new Set(G.last);
+  let h='';
+  for(const id of ids){
+    const T=G.tl[id];
+    h+=`<div class="row"><div class="lab">L${id}</div><div style="flex:none;width:${(T.s-tmin)*COL()}px"></div>`;
+    T.b.forEach((b,i)=>{
+      const t=T.s+i,hd=i===T.b.length-1,act=hd&&t%2===turn&&G.over===null;
+      h+=`<div class="b${act?' act':''}${lastSet.has(id+':'+t)?' new':''}"><div class="h"><span>${Math.floor(t/2)+1}${t%2?'ч':'б'}</span>${act?'<span>●</span>':''}</div><div class="g">`;
+      for(let y=7;y>=0;y--)for(let x=0;x<8;x++){
+        const c=b[y*8+x],dm=dset.get(id+','+t+','+x+','+y);
+        const s=sel&&sel.l===id&&sel.t===t&&sel.x===x&&sel.y===y;
+        h+=`<div class="sq ${(x+y)%2?'l':'d'}${s?' sel':''}${dm?(dm.cap?' dst cap':' dst'):''}" data-k="${id},${t},${x},${y}">${c?`<span class="${isW(c)?'pw':'pb'}">${GL[c.toUpperCase()]}</span>`:''}</div>`;
+      }
+      h+='</div></div>';
+    });
+    h+='</div>';
+  }
+  $('tls').innerHTML=h;
+  $('bar').textContent=status();
+  if(scroll){
+    const n=document.querySelector('.b.new');
+    if(n)n.scrollIntoView({inline:'center',block:'nearest',behavior:'smooth'});
+  }
+}
+
+$('tls').onclick=e=>{
+  const el=e.target.closest('.sq');
+  if(!el||busy||G.over!==null||turn!==me)return;
+  const [l,t,x,y]=el.dataset.k.split(',').map(Number);
+  const mv=sel&&dests.find(m=>m.dl===l&&m.dt===t&&m.dx===x&&m.dy===y);
+  if(mv){doMove(mv);return;}
+  const B=get(G,l,t),c=B&&B[y*8+x];
+  msg='';
+  if(c&&col(c)===me&&t===headT(G.tl[l])&&t%2===me){
+    sel={l,t,x,y};
+    dests=legalFor(G,me,l,t,x,y);
+    if(!dests.length)msg='у этой фигуры нет безопасных ходов';
+  }else{sel=null;dests=[];}
+  render(false);
+};
+
+function doMove(m){
+  G=apply(G,m);
+  if(G.over===null)turn=1-turn;
+  afterMove(true);
+}
+function afterMove(scroll){
+  sel=null;dests=[];msg='';busy=false;
+  if(G.over===null&&!anyLegal(G,turn))G={...G,over:1-turn,why:1};
+  if(G.over===null){
+    chk=turn===me?inCheck(G,turn):false;
+    if(turn!==me)busy=true;
+  }
+  render(scroll);
+  if(busy)setTimeout(botTurn,80);
+}
+function botTurn(){
+  const m=botMove(G,turn,lvl);
+  busy=false;
+  if(!m){G={...G,over:me,why:1};render(false);return;}
+  G=apply(G,m);
+  if(G.over===null)turn=1-turn;
+  afterMove(true);
+}
+
+buildSetup();
+</script>
+</body>
+</html>
