@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>5D шахматы</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <style>
 :root{--bg:#14171d;--panel:#1d222b;--line:#2f3744;--tx:#e8e6df;--mut:#98a0ad;--acc:#e0a526;--lt:#d9d2bd;--dk:#7d8f69;--s:24px}
 *{box-sizing:border-box}
@@ -46,6 +47,8 @@ summary{cursor:pointer;color:var(--tx)}
 .help h3{margin:16px 0 4px;font-size:16px;color:var(--acc)}
 #setup .help p,.help p{margin:0 0 6px;color:var(--tx)}
 #hc{margin:16px auto 30px;display:block}
+#code{font:inherit;color:inherit;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px;width:140px;text-transform:uppercase}
+#netMsg{margin-top:12px}
 </style>
 </head>
 <body>
@@ -53,11 +56,18 @@ summary{cursor:pointer;color:var(--tx)}
 <div id="setup">
   <h1>5D шахматы</h1>
   <p>Шахматы с путешествиями по времени и параллельным линиям. Играйте против бота.</p>
-  <h2>Сложность бота</h2>
-  <div class="opts" id="lv"></div>
+  <h2>Режим</h2>
+  <div class="opts" id="md"></div>
+  <div id="botBox"><h2>Сложность бота</h2><div class="opts" id="lv"></div></div>
   <h2>Ваш цвет</h2>
   <div class="opts" id="cl"></div>
   <button class="go" id="start">Начать игру</button>
+  <div id="netBox" style="display:none">
+    <button class="go" id="mk">Создать комнату</button>
+    <h2>Или войти по коду друга</h2>
+    <div class="opts"><input id="code" maxlength="5" placeholder="КОД" autocomplete="off"><button id="jn">Войти</button></div>
+    <p id="netMsg"></p>
+  </div>
   <details open><summary>Как играть</summary><div class="help" id="helpS"></div></details>
 </div>
 
@@ -254,32 +264,39 @@ function botMove(S,p,lvl){
 /* ---------- интерфейс ---------- */
 const $=id=>document.getElementById(id);
 const LV=['Новичок','Лёгкий','Средний','Сложный'];
-let lvl=2,me=0,G,turn,sel=null,dests=[],busy=false,chk=false,sz=innerWidth>=900?48:24;
+let mode='bot',lost=false,peer=null,conn=null,lvl=2,me=0,G,turn,sel=null,dests=[],busy=false,chk=false,sz=innerWidth>=900?48:24;
 const COL=()=>8*sz+10;
 
 function buildSetup(){
+  $('md').innerHTML=[['С ботом','bot'],['С другом онлайн','net']].map(([n,v])=>`<button data-m="${v}" class="${mode===v?'on':''}">${n}</button>`).join('');
+  $('botBox').style.display=mode==='bot'?'block':'none';
+  $('start').style.display=mode==='bot'?'block':'none';
+  $('netBox').style.display=mode==='net'?'block':'none';
   $('lv').innerHTML=LV.map((n,i)=>`<button data-v="${i+1}" class="${lvl===i+1?'on':''}">${n}</button>`).join('');
   $('cl').innerHTML=[['Белые',0],['Чёрные',1]].map(([n,v])=>`<button data-c="${v}" class="${me===v?'on':''}">${n}</button>`).join('');
 }
+$('md').onclick=e=>{const b=e.target.closest('button');if(b){mode=b.dataset.m;buildSetup();}};
 $('lv').onclick=e=>{const b=e.target.closest('button');if(b){lvl=+b.dataset.v;buildSetup();}};
 $('cl').onclick=e=>{const b=e.target.closest('button');if(b){me=+b.dataset.c;buildSetup();}};
 $('start').onclick=()=>{
   $('setup').style.display='none';$('game').style.display='flex';
-  G=init();turn=0;sel=null;dests=[];busy=false;
+  mode='bot';G=init();turn=0;sel=null;dests=[];busy=false;lost=false;
   afterMove(false);
 };
-$('nw').onclick=()=>{$('game').style.display='none';$('setup').style.display='block';busy=false;};
+$('nw').onclick=()=>{closeNet();G=null;lost=false;buildSetup();netSay('');$('game').style.display='none';$('setup').style.display='block';busy=false;};
 function setSize(v){sz=Math.max(14,Math.min(90,v));document.documentElement.style.setProperty('--s',sz+'px');if(G)render(false);}
 $('zm').onclick=()=>setSize(sz-6);
 $('zp').onclick=()=>setSize(sz+6);
 
 function status(){
   if(G.over!==null){
-    const w=G.over===me;
-    return w?(G.why?'🏆 Победа: у бота нет безопасных ходов':'🏆 Победа: король взят')
+    const w=G.over===me,o=mode==='net'?'друга':'бота';
+    return w?(G.why?'🏆 Победа: у '+o+' нет безопасных ходов':'🏆 Победа: король взят')
             :(G.why?'Поражение: у вас нет безопасных ходов':'Поражение: ваш король взят');
   }
   const side=turn?'чёрные':'белые';
+  if(lost)return '⚠ Друг отключился. Партия остановлена';
+  if(mode==='net'&&turn!==me)return `Ход друга · ${side}`;
   if(busy)return `Бот думает… (${LV[lvl-1]}, ${side})`;
   let s=`Ваш ход · ${side}`;
   if(chk)s+=' · ⚠ шах';
@@ -334,6 +351,7 @@ $('tls').onclick=e=>{
 };
 
 function doMove(m){
+  if(mode==='net'&&conn&&conn.open)conn.send({t:'move',m});
   G=apply(G,m);
   if(G.over===null)turn=1-turn;
   afterMove(true);
@@ -343,12 +361,13 @@ function afterMove(scroll){
   if(G.over===null&&!anyLegal(G,turn))G={...G,over:1-turn,why:1};
   if(G.over===null){
     chk=turn===me?inCheck(G,turn):false;
-    if(turn!==me)busy=true;
+    if(turn!==me&&mode==='bot')busy=true;
   }
   render(scroll);
   if(busy)setTimeout(botTurn,80);
 }
 function botTurn(){
+  if(!G||mode!=='bot'||$('game').style.display==='none')return;
   const m=botMove(G,turn,lvl);
   busy=false;
   if(!m){G={...G,over:me,why:1};render(false);return;}
@@ -356,6 +375,65 @@ function botTurn(){
   if(G.over===null)turn=1-turn;
   afterMove(true);
 }
+
+
+/* ---------- онлайн (PeerJS) ---------- */
+function closeNet(){try{conn&&conn.close();}catch(e){}try{peer&&peer.destroy();}catch(e){}conn=peer=null;}
+function netSay(t){$('netMsg').textContent=t;}
+function noPeer(){if(typeof Peer==='undefined'){netSay('Не загрузился PeerJS. Проверь интернет и обнови страницу.');return true;}return false;}
+function genCode(){const a='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let c='';for(let i=0;i<5;i++)c+=a[Math.random()*a.length|0];return c;}
+function startNet(){
+  mode='net';lost=false;
+  $('setup').style.display='none';$('game').style.display='flex';
+  G=init();turn=0;sel=null;dests=[];busy=false;
+  afterMove(false);
+}
+function wire(c){
+  c.on('data',d=>{
+    if(!d)return;
+    if(d.t==='hello'){me=d.you;startNet();}
+    else if(d.t==='move')onMove(d.m);
+  });
+  c.on('close',()=>{lost=true;if(G&&G.over===null)render(false);else netSay('Друг отключился.');});
+}
+function onMove(m){
+  if(!G||G.over!==null||turn===me)return;
+  const mm=genAll(G,turn).find(x=>x.sl===m.sl&&x.st===m.st&&x.sx===m.sx&&x.sy===m.sy&&x.dl===m.dl&&x.dt===m.dt&&x.dx===m.dx&&x.dy===m.dy);
+  if(!mm)return;
+  G=apply(G,mm);if(G.over===null)turn=1-turn;
+  afterMove(true);
+}
+function hostRoom(){
+  if(noPeer())return;
+  closeNet();
+  const code=genCode();
+  peer=new Peer('chess5d-'+code);
+  peer.on('open',()=>{
+    const link=location.origin+location.pathname+'?room='+code;
+    $('netMsg').innerHTML='Код комнаты: <b style="font-size:30px;letter-spacing:5px">'+code+'</b><br>Отправь код другу или <button id="cp">скопировать ссылку</button><br><span style="color:var(--mut)">Не закрывай эту страницу. Жду друга…</span>';
+    $('cp').onclick=()=>{
+      try{navigator.clipboard.writeText(link);$('cp').textContent='скопировано';}catch(e){$('cp').textContent=link;}
+    };
+  });
+  peer.on('error',err=>{if(err.type==='unavailable-id')hostRoom();else netSay('Ошибка соединения: '+err.type);});
+  peer.on('connection',c=>{
+    if(conn){c.close();return;}
+    conn=c;wire(c);
+    c.on('open',()=>{c.send({t:'hello',you:1-me});startNet();});
+  });
+}
+function joinRoom(code){
+  if(noPeer())return;
+  code=(code||'').trim().toUpperCase();
+  if(!code){netSay('Введи код комнаты.');return;}
+  closeNet();
+  netSay('Подключаюсь…');
+  peer=new Peer();
+  peer.on('error',err=>netSay(err.type==='peer-unavailable'?'Комната не найдена. Проверь код.':'Ошибка соединения: '+err.type));
+  peer.on('open',()=>{conn=peer.connect('chess5d-'+code,{reliable:true});wire(conn);});
+}
+$('mk').onclick=hostRoom;
+$('jn').onclick=()=>joinRoom($('code').value);
 
 const HELP=`
 <h3>1. Что это за игра</h3>
@@ -416,7 +494,14 @@ const HELP=`
 <p><b>Бот долго думает.</b> На «Сложном» это бывает, подожди.</p>
 <p><b>Хочу сыграть заново.</b> Кнопка «Новая игра» внизу.</p>
 
-<h3>11. Советы новичку</h3>
+<h3>11. Игра с другом онлайн</h3>
+<p>1. На стартовом экране выбери «С другом онлайн».</p>
+<p>2. Выбери свой цвет и нажми «Создать комнату». Появится код из 5 символов.</p>
+<p>3. Отправь код другу. Можно нажать «скопировать ссылку» и отправить ссылку: друг откроет её и сразу войдёт.</p>
+<p>4. Друг открывает игру, выбирает «С другом онлайн», вводит код и нажимает «Войти». Партия начнётся сама, у друга будет противоположный цвет.</p>
+<p>Пока идёт партия, не закрывайте страницу. Если кто-то вышел, партия остановится. Если не соединяется, попробуйте оба переключиться на один Wi‑Fi или создать комнату заново.</p>
+
+<h3>12. Советы новичку</h3>
 <p>Сначала играй на одной главной доске, как в обычных шахматах. Через время научишься прыгать.</p>
 <p>Перед каждым ходом глянь, нет ли угрозы королю на других досках.</p>
 <p>Не жалей время: бот ждёт, пока ты нажмёшь.</p>
@@ -426,6 +511,10 @@ $('hp').onclick=()=>{$('help').style.display='block';};
 $('hc').onclick=()=>{$('help').style.display='none';};
 buildSetup();
 setSize(sz);
+addEventListener('load',()=>{
+  const q=new URLSearchParams(location.search).get('room');
+  if(q){mode='net';buildSetup();$('code').value=q.toUpperCase();joinRoom(q);}
+});
 </script>
 </body>
 </html>
